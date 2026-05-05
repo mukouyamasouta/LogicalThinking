@@ -1,37 +1,42 @@
-const MODEL = import.meta.env.VITE_MODEL ?? "claude-opus-4-7";
-
 export class LLMUnavailableError extends Error {
-  constructor() {
-    super(
-      "window.claude.complete が見つかりません。このアプリは claude.ai の Artifact 内で動作することを想定しています。"
-    );
+  constructor(detail = "") {
+    super(`LLM が利用できません。${detail}`);
     this.name = "LLMUnavailableError";
   }
 }
 
 export async function complete(prompt: string): Promise<string> {
-  if (typeof window === "undefined" || !window.claude?.complete) {
-    if (import.meta.env.DEV) {
-      console.warn("[llm] window.claude.complete が無いためモック応答を返します");
-      return mockResponse(prompt);
-    }
-    throw new LLMUnavailableError();
+  // 優先① claude.ai Artifact ランタイム
+  if (typeof window !== "undefined" && window.claude?.complete) {
+    return window.claude.complete(prompt);
   }
-  return window.claude.complete(prompt);
+
+  // 優先② Vercel serverless function (/api/complete → Groq)
+  if (typeof window !== "undefined") {
+    return callApi(prompt);
+  }
+
+  throw new LLMUnavailableError("window がありません。");
 }
 
-export function getModelName(): string {
-  return MODEL;
-}
+async function callApi(prompt: string): Promise<string> {
+  let res: Response;
+  try {
+    res = await fetch("/api/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt }),
+    });
+  } catch (e) {
+    throw new LLMUnavailableError(`ネットワークエラー: ${String(e)}`);
+  }
 
-function mockResponse(prompt: string): string {
-  const head = prompt.slice(-200);
-  return [
-    "（開発モック応答）",
-    "良い視点です。もう一段深く掘り下げてみましょう。",
-    "",
-    `ヒント: ${head.match(/STEP\s*\d/)?.[0] ?? "現在のステップ"}を踏まえ、根拠を1つ追加してみてください。`,
-    "",
-    "次の問いに進める準備ができたら『次のステップへ』を押してください。",
-  ].join("\n");
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new LLMUnavailableError(`サーバーエラー (${res.status}): ${text}`);
+  }
+
+  const data = (await res.json()) as { text?: string; error?: string };
+  if (data.error) throw new LLMUnavailableError(data.error);
+  return data.text ?? "";
 }
