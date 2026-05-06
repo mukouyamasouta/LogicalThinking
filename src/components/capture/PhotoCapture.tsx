@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { Camera, FolderOpen, Loader2, X, Image } from "lucide-react";
 import { fileToDataUrl, extractImageFeatures } from "../../lib/imageFeatures";
 import { extractText } from "../../lib/ocr";
@@ -9,16 +9,30 @@ interface Props {
   onChange: (data: { dataUrl?: string; features?: ImageFeatures; copyText?: string }) => void;
 }
 
-export function PhotoCapture({ imageDataUrl, onChange }: Props) {
-  // ファイル選択（ギャラリー・スクリーンショット・ファイル全般）
-  const fileRef = useRef<HTMLInputElement>(null);
-  // カメラ直接起動（モバイル）
-  const cameraRef = useRef<HTMLInputElement>(null);
+const labelStyle = (primary: boolean, disabled: boolean): React.CSSProperties => ({
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  padding: "8px 14px",
+  borderRadius: "var(--radius)",
+  fontSize: 13,
+  fontWeight: 500,
+  cursor: disabled ? "not-allowed" : "pointer",
+  opacity: disabled ? 0.5 : 1,
+  pointerEvents: disabled ? "none" : "auto",
+  userSelect: "none",
+  background: primary ? "var(--accent)" : "var(--bg-elevated)",
+  color: primary ? "#fff" : "var(--text)",
+  border: primary ? "none" : "1px solid var(--border)",
+  transition: "opacity 0.15s",
+});
 
+export function PhotoCapture({ imageDataUrl, onChange }: Props) {
   const [analyzing, setAnalyzing] = useState(false);
-  const [progress, setProgress] = useState<string>("");
+  const [progress, setProgress] = useState("");
 
   const handleFile = async (file: File) => {
+    if (analyzing) return;
     setAnalyzing(true);
 
     setProgress("画像を読み込み中...");
@@ -37,12 +51,17 @@ export function PhotoCapture({ imageDataUrl, onChange }: Props) {
     setProgress("");
   };
 
-  const clear = () => {
-    onChange({ dataUrl: undefined, features: undefined, copyText: undefined });
-    if (fileRef.current) fileRef.current.value = "";
-    if (cameraRef.current) cameraRef.current.value = "";
+  const onInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) handleFile(f);
+    e.target.value = ""; // 同じファイルを再選択できるようにリセット
   };
 
+  const clear = () => {
+    onChange({ dataUrl: undefined, features: undefined, copyText: undefined });
+  };
+
+  /* 画像選択済み */
   if (imageDataUrl) {
     return (
       <div style={{ position: "relative" }}>
@@ -52,14 +71,15 @@ export function PhotoCapture({ imageDataUrl, onChange }: Props) {
           style={{
             width: "100%", maxHeight: 320, objectFit: "contain",
             background: "var(--bg-subtle)", borderRadius: "var(--radius)",
-            border: "1px solid var(--border)",
+            border: "1px solid var(--border)", display: "block",
           }}
         />
         {analyzing && (
           <div style={{
             position: "absolute", bottom: 0, left: 0, right: 0,
-            background: "rgba(0,0,0,0.6)", color: "#fff",
-            padding: "8px 12px", borderRadius: "0 0 var(--radius) var(--radius)",
+            background: "rgba(0,0,0,0.65)", color: "#fff",
+            padding: "8px 12px",
+            borderRadius: "0 0 var(--radius) var(--radius)",
             display: "flex", alignItems: "center", gap: 8, fontSize: 13,
           }}>
             <Loader2 size={13} style={{ animation: "spin 1s linear infinite", flexShrink: 0 }} />
@@ -71,7 +91,6 @@ export function PhotoCapture({ imageDataUrl, onChange }: Props) {
             onClick={clear}
             className="btn"
             style={{ position: "absolute", top: 8, right: 8, padding: "4px 8px", fontSize: 12 }}
-            aria-label="画像を削除"
           >
             <X size={13} /> 削除
           </button>
@@ -81,32 +100,32 @@ export function PhotoCapture({ imageDataUrl, onChange }: Props) {
     );
   }
 
+  /* 未選択 */
   return (
     <div>
-      {/* capture属性なし → ギャラリー・スクリーンショット・ファイル全般 */}
+      {/*
+        iOS Safari 対応: label[htmlFor] → input[type=file] の直接関連付け。
+        button→.click() の間接呼び出しはブロックされるが、
+        label クリックはブラウザネイティブで処理されるため確実に動く。
+      */}
+
+      {/* アルバム・スクショ用: capture属性なし → OS標準ピッカーが開く */}
       <input
-        ref={fileRef}
+        id="photo-album"
         type="file"
         accept="image/*"
-        style={{ display: "none" }}
-        onChange={e => {
-          const f = e.target.files?.[0];
-          if (f) handleFile(f);
-          e.target.value = "";
-        }}
+        style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
+        onChange={onInputChange}
       />
-      {/* capture="environment" → モバイルでカメラを直接起動 */}
+
+      {/* カメラ直接起動用: capture="environment" */}
       <input
-        ref={cameraRef}
+        id="photo-camera"
         type="file"
         accept="image/*"
         capture="environment"
-        style={{ display: "none" }}
-        onChange={e => {
-          const f = e.target.files?.[0];
-          if (f) handleFile(f);
-          e.target.value = "";
-        }}
+        style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
+        onChange={onInputChange}
       />
 
       <div style={{
@@ -122,30 +141,20 @@ export function PhotoCapture({ imageDataUrl, onChange }: Props) {
         </div>
 
         <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
-          {/* capture属性なし → OS標準ピッカー（写真アルバム・スクショ・ファイル全対応） */}
-          <button
-            className="btn btn-primary"
-            onClick={() => fileRef.current?.click()}
-            disabled={analyzing}
-            style={{ fontSize: 13 }}
-          >
+          {/* label → input 直接関連付け（iOS Safe） */}
+          <label htmlFor="photo-album" style={labelStyle(true, analyzing)}>
             <FolderOpen size={14} />
-            アルバム / スクショ / ファイル
-          </button>
-          {/* capture="environment" → カメラを直接起動（スマホ向け） */}
-          <button
-            className="btn"
-            onClick={() => cameraRef.current?.click()}
-            disabled={analyzing}
-            style={{ fontSize: 13 }}
-          >
+            アルバム・スクショを選ぶ
+          </label>
+
+          <label htmlFor="photo-camera" style={labelStyle(false, analyzing)}>
             <Camera size={14} />
             カメラで撮影
-          </button>
+          </label>
         </div>
 
         <div className="subtle" style={{ textAlign: "center", marginTop: 10 }}>
-          📱 スマホ: アルバム・スクリーンショット対応　💻 PC: ドラッグ&ファイル選択対応
+          📱 写真フォルダ・スクリーンショット・PCファイルに対応
         </div>
       </div>
 
