@@ -24,6 +24,7 @@ function newRecord(difficulty: Difficulty, context: AdContext): AnalysisRecord {
 export function useAnalysis() {
   const [record, setRecord] = useState<AnalysisRecord | null>(null);
   const [busy, setBusy] = useState(false);
+  const [starting, setStarting] = useState(false); // 初回呼び出し専用ローディング
   const [error, setError] = useState<string | null>(null);
   const recordRef = useRef(record);
   useEffect(() => { recordRef.current = record; }, [record]);
@@ -33,11 +34,11 @@ export function useAnalysis() {
     setRecord(r);
   }, []);
 
+  // setRecord はここでは呼ばず、初回返答が来てから画面を切り替える
   const start = useCallback(async (difficulty: Difficulty, context: AdContext) => {
     setError(null);
+    setStarting(true);
     const r = newRecord(difficulty, context);
-    setRecord(r);
-    setBusy(true);
     try {
       const reply = await complete(buildInitialPrompt(context, difficulty));
       const msg: ChatMessage = { id: nanoid(6), role: "assistant", content: reply, createdAt: Date.now() };
@@ -45,7 +46,7 @@ export function useAnalysis() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setBusy(false);
+      setStarting(false);
     }
   }, [persist]);
 
@@ -95,10 +96,7 @@ export function useAnalysis() {
         createdAt: Date.now(),
       };
 
-      const next: AnalysisRecord = {
-        ...withUser,
-        messages: [...withUser.messages, aiMsg],
-      };
+      const next: AnalysisRecord = { ...withUser, messages: [...withUser.messages, aiMsg] };
 
       if (stepToProcess) {
         const existingIdx = next.answers.findIndex(a => a.step === stepToProcess);
@@ -151,7 +149,8 @@ export function useAnalysis() {
   const reset = useCallback(() => {
     setRecord(null);
     setError(null);
+    setStarting(false);
   }, []);
 
-  return { record, busy, error, start, sendMessage, advanceStep, finish, reset, loadExisting };
+  return { record, busy, starting, error, start, sendMessage, advanceStep, finish, reset, loadExisting };
 }

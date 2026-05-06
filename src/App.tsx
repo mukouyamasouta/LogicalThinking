@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Play, RotateCcw } from "lucide-react";
+import { Play, RotateCcw, Loader2, Clock } from "lucide-react";
 import { AppHeader } from "./components/layout/AppHeader";
 import { DifficultyToggle } from "./components/layout/DifficultyToggle";
 import { PhotoCapture } from "./components/capture/PhotoCapture";
@@ -12,8 +12,10 @@ import { HistoryList } from "./components/history/HistoryList";
 import { ExportButton } from "./components/history/ExportButton";
 import { ShareButton } from "./components/share/ShareButton";
 import { FrameworkModal } from "./components/modals/FrameworkModal";
+import { ErrorBoundary } from "./components/layout/ErrorBoundary";
 import { useAnalysis } from "./hooks/useAnalysis";
 import { useHistory } from "./hooks/useHistory";
+import { useElapsedTime, formatElapsed } from "./hooks/useElapsedTime";
 import { readShareFromUrl } from "./lib/share";
 import type { AdContext, Difficulty } from "./types";
 
@@ -55,64 +57,79 @@ export default function App() {
   };
 
   return (
-    <div className="app-shell">
-      <AppHeader
-        view={view}
-        onChangeView={(v) => { setView(v); }}
-        onOpenFrameworks={() => setFrameworksOpen(true)}
-      />
-
-      {view === "analyze" && !analysis.record && (
-        <SetupScreen
-          difficulty={difficulty}
-          onDifficulty={setDifficulty}
-          context={context}
-          onContext={setContext}
-          onStart={startNew}
-          busy={analysis.busy}
+    <ErrorBoundary>
+      <div className="app-shell">
+        <AppHeader
+          view={view}
+          onChangeView={(v) => { setView(v); }}
+          onOpenFrameworks={() => setFrameworksOpen(true)}
         />
-      )}
 
-      {view === "analyze" && analysis.record && (
-        <AnalyzeScreen
-          record={analysis.record}
-          busy={analysis.busy}
-          error={analysis.error}
-          onSend={analysis.sendMessage}
-          onAdvance={analysis.advanceStep}
-          onReset={reset}
-          shared={sharedView}
-        />
-      )}
+        {/* セットアップ画面：record が来るまで表示し続ける（starting中もここに留まる） */}
+        {view === "analyze" && !analysis.record && (
+          <SetupScreen
+            difficulty={difficulty}
+            onDifficulty={setDifficulty}
+            context={context}
+            onContext={setContext}
+            onStart={startNew}
+            starting={analysis.starting}
+            error={analysis.error}
+          />
+        )}
 
-      {view === "history" && (
-        <HistoryScreen
-          records={history.records}
-          onOpen={(r) => { analysis.loadExisting(r); setView("analyze"); setSharedView(false); }}
-          onDelete={history.del}
-          onExport={history.exportAll}
-        />
-      )}
+        {view === "analyze" && analysis.record && (
+          <AnalyzeScreen
+            record={analysis.record}
+            busy={analysis.busy}
+            error={analysis.error}
+            onSend={analysis.sendMessage}
+            onAdvance={analysis.advanceStep}
+            onReset={reset}
+            shared={sharedView}
+          />
+        )}
 
-      <FrameworkModal open={frameworksOpen} onClose={() => setFrameworksOpen(false)} />
-    </div>
+        {view === "history" && (
+          <HistoryScreen
+            records={history.records}
+            onOpen={(r) => { analysis.loadExisting(r); setView("analyze"); setSharedView(false); }}
+            onDelete={history.del}
+            onExport={history.exportAll}
+          />
+        )}
+
+        <FrameworkModal open={frameworksOpen} onClose={() => setFrameworksOpen(false)} />
+      </div>
+    </ErrorBoundary>
   );
 }
 
+/* ──────────────────────────────────────────── */
+/* SetupScreen                                   */
+/* ──────────────────────────────────────────── */
 function SetupScreen(props: {
   difficulty: Difficulty;
   onDifficulty: (d: Difficulty) => void;
   context: AdContext;
   onContext: (c: AdContext) => void;
   onStart: () => void;
-  busy: boolean;
+  starting: boolean;
+  error: string | null;
 }) {
+  const elapsed = useElapsedTime(props.starting);
+
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <div className="card">
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          marginBottom: 16, flexWrap: "wrap", gap: 12,
+        }}>
           <div>
-            <h2 style={{ margin: 0, fontSize: 20, fontFamily: "var(--font-serif)" }}>広告を題材に論理思考を鍛える</h2>
+            <h2 style={{ margin: 0, fontSize: 20, fontFamily: "var(--font-serif)" }}>
+              広告を題材に論理思考を鍛える
+            </h2>
             <p className="muted" style={{ margin: "4px 0 0", fontSize: 14 }}>
               5ステップでターゲット〜代替案までを言語化します。
             </p>
@@ -138,16 +155,53 @@ function SetupScreen(props: {
           )}
         </div>
 
-        <div style={{ marginTop: 18, display: "flex", justifyContent: "flex-end" }}>
-          <button className="btn btn-primary" onClick={props.onStart} disabled={props.busy}>
-            <Play size={14} /> 分析を開始
+        {/* エラー表示 */}
+        {props.error && !props.starting && (
+          <div className="card" style={{
+            marginTop: 14, borderColor: "var(--danger)",
+            color: "var(--danger)", padding: "12px 14px", fontSize: 13,
+          }}>
+            {props.error}
+          </div>
+        )}
+
+        {/* 分析開始ボタン / ローディング */}
+        <div style={{ marginTop: 18, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 14 }}>
+          {props.starting && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text-muted)", fontSize: 13 }}>
+              <Clock size={13} />
+              <span>{formatElapsed(elapsed)} 経過</span>
+              <div style={{ width: 80, height: 3, background: "var(--border)", borderRadius: 2, overflow: "hidden" }}>
+                <div style={{
+                  height: "100%",
+                  width: `${Math.min((elapsed / 30) * 100, 100)}%`,
+                  background: elapsed > 20 ? "var(--warning)" : "var(--accent)",
+                  transition: "width 1s linear",
+                }} />
+              </div>
+            </div>
+          )}
+          <button
+            className="btn btn-primary"
+            onClick={props.onStart}
+            disabled={props.starting}
+            style={{ minWidth: 120 }}
+          >
+            {props.starting
+              ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> AI が考え中…</>
+              : <><Play size={14} /> 分析を開始</>
+            }
           </button>
         </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     </div>
   );
 }
 
+/* ──────────────────────────────────────────── */
+/* AnalyzeScreen                                */
+/* ──────────────────────────────────────────── */
 function AnalyzeScreen(props: {
   record: NonNullable<ReturnType<typeof useAnalysis>["record"]>;
   busy: boolean;
@@ -165,7 +219,7 @@ function AnalyzeScreen(props: {
         </div>
       )}
       {props.error && (
-        <div className="card" style={{ borderColor: "var(--danger)", color: "var(--danger)" }}>
+        <div className="card" style={{ borderColor: "var(--danger)", color: "var(--danger)", fontSize: 13 }}>
           {props.error}
         </div>
       )}
@@ -196,6 +250,9 @@ function AnalyzeScreen(props: {
   );
 }
 
+/* ──────────────────────────────────────────── */
+/* HistoryScreen                                */
+/* ──────────────────────────────────────────── */
 function HistoryScreen(props: {
   records: ReturnType<typeof useHistory>["records"];
   onOpen: (r: ReturnType<typeof useHistory>["records"][number]) => void;
@@ -206,7 +263,9 @@ function HistoryScreen(props: {
     <div style={{ display: "grid", gap: 16 }}>
       <GrowthChart records={props.records} />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2 style={{ margin: 0, fontSize: 17 }}>分析履歴 <span className="subtle">（{props.records.length}件）</span></h2>
+        <h2 style={{ margin: 0, fontSize: 17 }}>
+          分析履歴 <span className="subtle">（{props.records.length}件）</span>
+        </h2>
         <ExportButton onExport={props.onExport} />
       </div>
       <HistoryList records={props.records} onOpen={props.onOpen} onDelete={props.onDelete} />
