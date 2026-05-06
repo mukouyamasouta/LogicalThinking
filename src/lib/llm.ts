@@ -1,6 +1,6 @@
 export class LLMUnavailableError extends Error {
   constructor(detail = "") {
-    super(`LLM が利用できません。${detail}`);
+    super(detail || "LLM が利用できません。");
     this.name = "LLMUnavailableError";
   }
 }
@@ -28,17 +28,32 @@ async function callApi(prompt: string): Promise<string> {
       body: JSON.stringify({ prompt }),
     });
   } catch (e) {
-    throw new LLMUnavailableError(`ネットワークエラー: ${String(e)}`);
+    throw new LLMUnavailableError(`ネットワーク接続エラーです。インターネット接続を確認してください。（${String(e)}）`);
+  }
+
+  const isJson = res.headers.get("content-type")?.includes("application/json");
+
+  if (res.status === 429) {
+    const data = isJson ? (await res.json().catch(() => ({}))) as { retryAfter?: number } : {};
+    const wait = data.retryAfter ?? 60;
+    throw new LLMUnavailableError(
+      `⏳ APIのレート制限に達しました。約${wait}秒後に再度お試しください。\n` +
+      `（Groq free tierは1分あたりのトークン数に上限があります）`
+    );
   }
 
   if (!res.ok) {
     const raw = await res.text().catch(() => "");
-    // HTMLページなどが返ってきた場合はタグを除去して200字に切る
     const clean = raw.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 200);
-    const hint = res.status === 401
-      ? "（Vercel認証保護が有効かもしれません。ダッシュボードでDeployment Protectionをオフにしてください）"
-      : "";
-    throw new LLMUnavailableError(`サーバーエラー (${res.status})${hint}: ${clean}`);
+    const hints: Record<number, string> = {
+      401: "Vercel認証保護が有効かもしれません（Deployment Protection → OFF）",
+      500: "サーバー設定を確認してください（GROQ_API_KEY が正しく設定されているか）",
+      502: "Groq APIへの接続に失敗しました",
+    };
+    const hint = hints[res.status] ?? "";
+    throw new LLMUnavailableError(
+      `エラー (${res.status})${hint ? `\n${hint}` : ""}\n${clean}`
+    );
   }
 
   const data = (await res.json()) as { text?: string; error?: string };

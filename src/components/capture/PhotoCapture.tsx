@@ -121,16 +121,18 @@ export function PhotoCapture({ imageDataUrl, onChange }: Props) {
           <span style={{ fontSize: 14, color: "var(--text-muted)" }}>広告の画像を追加（任意）</span>
         </div>
 
-        <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+        <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+          {/* capture属性なし → OS標準ピッカー（写真アルバム・スクショ・ファイル全対応） */}
           <button
-            className="btn"
+            className="btn btn-primary"
             onClick={() => fileRef.current?.click()}
             disabled={analyzing}
             style={{ fontSize: 13 }}
           >
             <FolderOpen size={14} />
-            ギャラリー / スクショ
+            アルバム / スクショ / ファイル
           </button>
+          {/* capture="environment" → カメラを直接起動（スマホ向け） */}
           <button
             className="btn"
             onClick={() => cameraRef.current?.click()}
@@ -143,7 +145,7 @@ export function PhotoCapture({ imageDataUrl, onChange }: Props) {
         </div>
 
         <div className="subtle" style={{ textAlign: "center", marginTop: 10 }}>
-          スクリーンショット・写真フォルダ・PCファイルに対応
+          📱 スマホ: アルバム・スクリーンショット対応　💻 PC: ドラッグ&ファイル選択対応
         </div>
       </div>
 
