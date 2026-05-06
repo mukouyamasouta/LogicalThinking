@@ -11,7 +11,7 @@ export async function complete(prompt: string): Promise<string> {
     return window.claude.complete(prompt);
   }
 
-  // 優先② Vercel serverless function (/api/complete → Groq)
+  // 優先② Vercel serverless function (/api/complete → Groq → Gemini)
   if (typeof window !== "undefined") {
     return callApi(prompt);
   }
@@ -32,31 +32,36 @@ async function callApi(prompt: string): Promise<string> {
   }
 
   const isJson = res.headers.get("content-type")?.includes("application/json");
+  const data: {
+    text?: string;
+    error?: string;
+    quota?: boolean;
+    suggestion?: string;
+    detail?: string;
+  } = isJson ? await res.json().catch(() => ({})) : {};
 
-  if (res.status === 429) {
-    const data = isJson ? (await res.json().catch(() => ({}))) as { retryAfter?: number } : {};
-    const wait = data.retryAfter ?? 60;
-    throw new LLMUnavailableError(
-      `⏳ APIのレート制限に達しました。約${wait}秒後に再度お試しください。\n` +
-      `（Groq free tierは1分あたりのトークン数に上限があります）`
-    );
+  if (res.status === 429 || data.quota) {
+    const lines = [
+      "⏳ AIサービスの本日の無料枠を使い切りました。",
+      data.error ?? "",
+      data.suggestion ? `\n💡 ${data.suggestion}` : "\n💡 数分待つか、明日もう一度お試しください。",
+    ].filter(Boolean);
+    throw new LLMUnavailableError(lines.join("\n"));
   }
 
   if (!res.ok) {
-    const raw = await res.text().catch(() => "");
-    const clean = raw.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 200);
     const hints: Record<number, string> = {
       401: "Vercel認証保護が有効かもしれません（Deployment Protection → OFF）",
-      500: "サーバー設定を確認してください（GROQ_API_KEY が正しく設定されているか）",
-      502: "Groq APIへの接続に失敗しました",
+      500: "サーバー設定を確認してください（API キーが正しく設定されているか）",
+      502: "AIサービスへの接続に失敗しました",
     };
     const hint = hints[res.status] ?? "";
+    const detail = data.detail ?? data.error ?? "";
     throw new LLMUnavailableError(
-      `エラー (${res.status})${hint ? `\n${hint}` : ""}\n${clean}`
+      `エラー (${res.status})${hint ? `\n${hint}` : ""}${detail ? `\n${detail}` : ""}`
     );
   }
 
-  const data = (await res.json()) as { text?: string; error?: string };
   if (data.error) throw new LLMUnavailableError(data.error);
   return data.text ?? "";
 }
